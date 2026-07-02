@@ -24,7 +24,7 @@ Compressed inner members are decompressed to a temp file and served through an
 | Package | Status | Description |
 |---------|--------|-------------|
 | `cpio`  | ✅ initial | newc (SVR4) cpio archives as `fs.FS` |
-| `ar`    | planned | Unix `ar` archives as `fs.FS` |
+| `ar`    | ✅ initial | Unix `ar` archives as `fs.FS` |
 | `tar`   | planned | tar as `fs.FS` (thin wrapper) |
 | `deb`   | planned | `.deb` packages (ar + tar) |
 | `rpm`   | planned | `.rpm` packages (header + cpio) |
@@ -45,3 +45,21 @@ is available via `info.Sys().(cpio.Header)`.
 
 Only the newc formats (`070701` and `070702`) are supported — the formats
 produced by `cpio -H newc` and used by rpm payloads.
+
+## ar
+
+```go
+f, _ := os.Open("package.deb")
+info, _ := f.Stat()
+fsys, _ := ar.NewFS(f, info.Size())
+
+control, _ := fs.ReadFile(fsys, "control.tar.gz")
+```
+
+`FS` implements `fs.FS`, `fs.StatFS`, and `fs.ReadDirFS`. ar is a flat archive,
+so every member is a regular file directly under the root. Per-member metadata
+(uid/gid, mode) is available via `info.Sys().(ar.Header)`.
+
+The GNU (`//` name table with `/N` references) and BSD (`#1/N`) extended-name
+variants are supported. Archive symbol and name tables are consumed for indexing
+but not exposed as members.
