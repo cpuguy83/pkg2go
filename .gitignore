@@ -1,0 +1,11 @@
+# Binaries and build output
+*.exe
+*.test
+*.out
+
+# Go workspace
+go.work
+go.work.sum
+
+# Editor/OS cruft
+.DS_Store
