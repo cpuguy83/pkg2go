@@ -47,6 +47,17 @@ It recognizes `ar` archives, newc `cpio` archives, and `tar` archives (via
 tar2go). Compressed streams are not detected — decompress first and pass the
 resulting `io.ReaderAt`.
 
+For packages, `pkg2go.OpenPackage` sniffs the `.deb` (ar) and `.rpm` (lead)
+magics and returns a `Package` whose `Rootfs()` yields the extracted filesystem:
+
+```go
+f, _ := os.Open("pkg.deb") // or pkg.rpm
+info, _ := f.Stat()
+pkg, _ := pkg2go.OpenPackage(f, info.Size())
+defer pkg.Close()
+rootfs, _ := pkg.Rootfs()
+```
+
 ## cpio
 
 ```go
