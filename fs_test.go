@@ -7,8 +7,11 @@ import (
 	"strconv"
 	"testing"
 
+	stdtar "archive/tar"
+
 	"github.com/cpuguy83/pkg2go/ar"
 	"github.com/cpuguy83/pkg2go/cpio"
+	"github.com/cpuguy83/pkg2go/tar"
 )
 
 func TestNewFS(t *testing.T) {
@@ -49,6 +52,26 @@ func TestNewFS(t *testing.T) {
 		}
 		if string(got) != "hi" {
 			t.Fatalf("content = %q, want %q", got, "hi")
+		}
+	})
+
+	t.Run("a tar archive is opened as a tar filesystem", func(t *testing.T) {
+		archive := tarArchive("data.txt", []byte("tar payload"))
+
+		fsys, err := NewFS(bytes.NewReader(archive), int64(len(archive)))
+		if err != nil {
+			t.Fatalf("NewFS: %v", err)
+		}
+		if _, ok := fsys.(*tar.FS); !ok {
+			t.Fatalf("fsys type = %T, want *tar.FS", fsys)
+		}
+
+		got, err := fs.ReadFile(fsys, "data.txt")
+		if err != nil {
+			t.Fatalf("ReadFile: %v", err)
+		}
+		if string(got) != "tar payload" {
+			t.Fatalf("content = %q, want %q", got, "tar payload")
 		}
 	})
 
@@ -125,4 +148,19 @@ func pad4(b *bytes.Buffer, n int) {
 	for i := 0; i < (4-n%4)%4; i++ {
 		b.WriteByte(0)
 	}
+}
+
+// tarArchive builds a minimal single-file tar archive.
+func tarArchive(name string, data []byte) []byte {
+	var b bytes.Buffer
+	tw := stdtar.NewWriter(&b)
+	_ = tw.WriteHeader(&stdtar.Header{
+		Name:     name,
+		Mode:     0o644,
+		Typeflag: stdtar.TypeReg,
+		Size:     int64(len(data)),
+	})
+	_, _ = tw.Write(data)
+	_ = tw.Close()
+	return b.Bytes()
 }

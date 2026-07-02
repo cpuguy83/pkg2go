@@ -25,7 +25,7 @@ Compressed inner members are decompressed to a temp file and served through an
 |---------|--------|-------------|
 | `cpio`  | ✅ initial | newc (SVR4) cpio archives as `fs.FS` |
 | `ar`    | ✅ initial | Unix `ar` archives as `fs.FS` |
-| `tar`   | planned | tar as `fs.FS` (thin wrapper) |
+| `tar`   | ✅ initial | tar as `fs.FS` (thin wrapper) |
 | `deb`   | planned | `.deb` packages (ar + tar) |
 | `rpm`   | planned | `.rpm` packages (header + cpio) |
 
@@ -77,3 +77,19 @@ so every member is a regular file directly under the root. Per-member metadata
 The GNU (`//` name table with `/N` references) and BSD (`#1/N`) extended-name
 variants are supported. Archive symbol and name tables are consumed for indexing
 but not exposed as members.
+
+## tar
+
+```go
+f, _ := os.Open("data.tar")
+info, _ := f.Stat()
+fsys, _ := tar.NewFS(f, info.Size())
+
+data, _ := fs.ReadFile(fsys, "usr/bin/app")
+```
+
+`FS` implements `fs.FS`, `fs.StatFS`, `fs.ReadDirFS`, and `fs.ReadLinkFS`.
+Parsing is delegated to `archive/tar`, so GNU/PAX long names and extended
+attributes are handled transparently; hard links resolve to their target's data.
+Per-entry metadata is available via `info.Sys().(*tar.Header)` (the
+`archive/tar` header). GNU sparse files are not supported.
