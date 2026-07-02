@@ -25,9 +25,12 @@ Compressed inner members are decompressed to a temp file and served through an
 |---------|--------|-------------|
 | `cpio`  | ✅ initial | newc (SVR4) cpio archives as `fs.FS` |
 | `ar`    | ✅ initial | Unix `ar` archives as `fs.FS` |
-| `tar`   | ✅ initial | tar as `fs.FS` (thin wrapper) |
+| `compress` | ✅ initial | decompress a stream to a random-access `io.ReaderAt` |
 | `deb`   | planned | `.deb` packages (ar + tar) |
 | `rpm`   | planned | `.rpm` packages (header + cpio) |
+
+tar is read via [`github.com/cpuguy83/tar2go`](https://github.com/cpuguy83/tar2go)
+rather than a reader in this module.
 
 ## Autodetection
 
@@ -40,8 +43,9 @@ info, _ := f.Stat()
 fsys, _ := pkg2go.NewFS(f, info.Size()) // ar or cpio, chosen by magic
 ```
 
-It recognizes `ar` archives and newc `cpio` archives. Compressed streams are not
-detected — decompress first and pass the resulting `io.ReaderAt`.
+It recognizes `ar` archives, newc `cpio` archives, and `tar` archives (via
+tar2go). Compressed streams are not detected — decompress first and pass the
+resulting `io.ReaderAt`.
 
 ## cpio
 
@@ -80,16 +84,33 @@ but not exposed as members.
 
 ## tar
 
+tar is read through [`github.com/cpuguy83/tar2go`](https://github.com/cpuguy83/tar2go),
+which indexes a tar over an `io.ReaderAt` and serves it as an `fs.FS`:
+
 ```go
 f, _ := os.Open("data.tar")
-info, _ := f.Stat()
-fsys, _ := tar.NewFS(f, info.Size())
+fsys := tar2go.NewIndex(f).FS()
 
 data, _ := fs.ReadFile(fsys, "usr/bin/app")
 ```
 
-`FS` implements `fs.FS`, `fs.StatFS`, `fs.ReadDirFS`, and `fs.ReadLinkFS`.
-Parsing is delegated to `archive/tar`, so GNU/PAX long names and extended
-attributes are handled transparently; hard links resolve to their target's data.
-Per-entry metadata is available via `info.Sys().(*tar.Header)` (the
-`archive/tar` header). GNU sparse files are not supported.
+`pkg2go.NewFS` wires this up automatically when it detects a tar stream.
+
+## compress
+
+```go
+f, _ := os.Open("data.tar.zst")
+info, _ := f.Stat()
+dec, _ := compress.Decompress(f, info.Size()) // sniffs the codec by magic
+defer dec.Close()
+
+fsys := tar2go.NewIndex(io.NewSectionReader(dec, 0, dec.Size())).FS()
+```
+
+`Decompress` takes an `io.ReaderAt` and its size, detects the codec from the
+leading magic (gzip, bzip2, xz, zstd) and expands the member to a temporary
+file, returned as a `*File` that is an `io.ReaderAt` — giving the random access
+the container readers need. An uncompressed member is passed through directly,
+without copying or a temp file (and `Close` is then a no-op). `DecompressAs`
+selects the codec explicitly (needed for lzma, which has no reliable magic; rpm
+names its payload codec in the header).

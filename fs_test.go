@@ -11,7 +11,6 @@ import (
 
 	"github.com/cpuguy83/pkg2go/ar"
 	"github.com/cpuguy83/pkg2go/cpio"
-	"github.com/cpuguy83/pkg2go/tar"
 )
 
 func TestNewFS(t *testing.T) {
@@ -61,9 +60,6 @@ func TestNewFS(t *testing.T) {
 		fsys, err := NewFS(bytes.NewReader(archive), int64(len(archive)))
 		if err != nil {
 			t.Fatalf("NewFS: %v", err)
-		}
-		if _, ok := fsys.(*tar.FS); !ok {
-			t.Fatalf("fsys type = %T, want *tar.FS", fsys)
 		}
 
 		got, err := fs.ReadFile(fsys, "data.txt")

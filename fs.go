@@ -7,7 +7,7 @@ import (
 
 	"github.com/cpuguy83/pkg2go/ar"
 	"github.com/cpuguy83/pkg2go/cpio"
-	"github.com/cpuguy83/pkg2go/tar"
+	"github.com/cpuguy83/tar2go"
 )
 
 // Archive magics used to detect the format of a stream.
@@ -26,7 +26,7 @@ const sniffLen = len(arMagic)
 // NewFS identifies the archive format of ra, which must contain exactly size
 // bytes, and returns an [io/fs.FS] serving its contents. It recognizes ar, newc
 // cpio, and tar archives by their magic and delegates to [ar.NewFS],
-// [cpio.NewFS], or [tar.NewFS] respectively.
+// [cpio.NewFS], or github.com/cpuguy83/tar2go respectively.
 //
 // It returns an error if the format is not recognized. Compressed streams are
 // not detected; decompress first and pass the resulting [io.ReaderAt].
@@ -44,7 +44,7 @@ func NewFS(ra io.ReaderAt, size int64) (fs.FS, error) {
 	case hasPrefix(buf, cpioMagicNewc), hasPrefix(buf, cpioMagicNewcCRC):
 		return cpio.NewFS(ra, size)
 	case isTar(ra, size):
-		return tar.NewFS(ra, size)
+		return tar2go.NewIndex(io.NewSectionReader(ra, 0, size)).FS(), nil
 	default:
 		return nil, fmt.Errorf("pkg2go: unrecognized archive format")
 	}
