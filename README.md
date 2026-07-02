@@ -26,7 +26,7 @@ Compressed inner members are decompressed to a temp file and served through an
 | `cpio`  | ✅ initial | newc (SVR4) cpio archives as `fs.FS` |
 | `ar`    | ✅ initial | Unix `ar` archives as `fs.FS` |
 | `compress` | ✅ initial | decompress a stream to a random-access `io.ReaderAt` |
-| `deb`   | planned | `.deb` packages (ar + tar) |
+| `deb`   | ✅ initial | `.deb` packages (ar + tar) |
 | `rpm`   | planned | `.rpm` packages (header + cpio) |
 
 tar is read via [`github.com/cpuguy83/tar2go`](https://github.com/cpuguy83/tar2go)
@@ -114,3 +114,20 @@ the container readers need. An uncompressed member is passed through directly,
 without copying or a temp file (and `Close` is then a no-op). `DecompressAs`
 selects the codec explicitly (needed for lzma, which has no reliable magic; rpm
 names its payload codec in the header).
+
+## deb
+
+```go
+f, _ := os.Open("hello.deb")
+info, _ := f.Stat()
+pkg, _ := deb.Open(f, info.Size())
+defer pkg.Close()
+
+rootfs, _ := pkg.Rootfs() // fs.FS over the extracted data.tar.*
+```
+
+A `.deb` is an `ar` archive of `debian-binary`, `control.tar.*` and
+`data.tar.*`. `deb.Open` indexes only the outer `ar`; `Rootfs` decompresses the
+`data.tar.*` member on first use and memoizes it. The
+payload codec is detected from the member's magic, so the file extension is
+irrelevant. Temp files created for compressed members are released by `Close`.
