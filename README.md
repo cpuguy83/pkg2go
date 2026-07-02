@@ -27,7 +27,7 @@ Compressed inner members are decompressed to a temp file and served through an
 | `ar`    | ✅ initial | Unix `ar` archives as `fs.FS` |
 | `compress` | ✅ initial | decompress a stream to a random-access `io.ReaderAt` |
 | `deb`   | ✅ initial | `.deb` packages (ar + tar) |
-| `rpm`   | planned | `.rpm` packages (header + cpio) |
+| `rpm`   | ✅ initial | `.rpm` packages (header + cpio) |
 
 tar is read via [`github.com/cpuguy83/tar2go`](https://github.com/cpuguy83/tar2go)
 rather than a reader in this module.
@@ -131,3 +131,21 @@ A `.deb` is an `ar` archive of `debian-binary`, `control.tar.*` and
 `data.tar.*` member on first use and memoizes it. The
 payload codec is detected from the member's magic, so the file extension is
 irrelevant. Temp files created for compressed members are released by `Close`.
+
+## rpm
+
+```go
+f, _ := os.Open("hello.rpm")
+info, _ := f.Stat()
+pkg, _ := rpm.Open(f, info.Size())
+defer pkg.Close()
+
+rootfs, _ := pkg.Rootfs() // fs.FS over the decompressed cpio payload
+```
+
+An `.rpm` is a 96-byte lead, a signature header, a main header, and a
+compressed cpio payload. `rpm.Open` parses the lead and headers only far enough
+to locate the payload and read its `RPMTAG_PAYLOADCOMPRESSOR`; `Rootfs`
+decompresses the payload on first use and memoizes it. The named compressor is
+honored (lzma in particular has no reliable magic), falling back to sniffing
+when the tag is absent. `Close` releases the temp file backing the payload.
