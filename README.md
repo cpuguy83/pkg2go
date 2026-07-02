@@ -29,6 +29,20 @@ Compressed inner members are decompressed to a temp file and served through an
 | `deb`   | planned | `.deb` packages (ar + tar) |
 | `rpm`   | planned | `.rpm` packages (header + cpio) |
 
+## Autodetection
+
+The top-level `pkg2go.NewFS` sniffs the archive magic and dispatches to the
+right container reader:
+
+```go
+f, _ := os.Open("archive")
+info, _ := f.Stat()
+fsys, _ := pkg2go.NewFS(f, info.Size()) // ar or cpio, chosen by magic
+```
+
+It recognizes `ar` archives and newc `cpio` archives. Compressed streams are not
+detected — decompress first and pass the resulting `io.ReaderAt`.
+
 ## cpio
 
 ```go
