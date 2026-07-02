@@ -160,3 +160,18 @@ to locate the payload and read its `RPMTAG_PAYLOADCOMPRESSOR`; `Rootfs`
 decompresses the payload on first use and memoizes it. The named compressor is
 honored (lzma in particular has no reliable magic), falling back to sniffing
 when the tag is absent. `Close` releases the temp file backing the payload.
+
+## Symlinks
+
+The extracted filesystem reproduces the package faithfully: symlinks keep the
+exact target recorded in the archive, exposed through `ReadLink`/`Lstat`
+(`io/fs.ReadLinkFS`). Package symlinks are frequently **absolute** and assume the
+root filesystem lives at `/` — e.g. `/usr/bin/foo -> /usr/lib/foo/foo`.
+
+Absolute targets are resolved by the kernel against the reading process's root,
+not against wherever the tree happens to be rooted. So if you mount or extract
+the rootfs under a subdirectory (say `/mnt/pkg`), an absolute symlink still
+points at the host's `/...` and escapes the tree. This is ordinary path
+resolution, not a quirk of pkg2go — extracting the package to `/mnt/pkg` on disk
+behaves identically. To consume the tree as a real root filesystem, root it at
+`/` (a mount namespace with `pivot_root`, or `chroot`).
