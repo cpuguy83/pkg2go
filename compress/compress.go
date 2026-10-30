@@ -9,8 +9,9 @@
 // per-codec seekability handling. An uncompressed member is passed through
 // directly — no copy and no temporary file.
 //
-// The gzip and bzip2 codecs come from the standard library; xz and lzma are
-// provided by github.com/ulikunitz/xz and zstd by
+// The gzip and bzip2 codecs come from the standard library. The xz codec uses
+// the system xz binary when available on PATH, otherwise github.com/ulikunitz/xz.
+// The lzma codec uses github.com/ulikunitz/xz and zstd uses
 // github.com/klauspost/compress/zstd.
 package compress
 
@@ -18,9 +19,12 @@ import (
 	"bytes"
 	"compress/bzip2"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"strings"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/ulikunitz/xz"
@@ -130,26 +134,39 @@ func DecompressAs(ra io.ReaderAt, size int64, codec Codec) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer dr.Close()
 	return spool(dr)
 }
 
-// decoder wraps r in the decompressor for codec.
-func decoder(r io.Reader, codec Codec) (io.Reader, error) {
+// decoder wraps r in the decompressor for codec. Callers must close the reader,
+// including when reading stops before EOF.
+func decoder(r io.Reader, codec Codec) (io.ReadCloser, error) {
 	switch codec {
 	case Gzip:
 		return gzip.NewReader(r)
 	case Bzip2:
-		return bzip2.NewReader(r), nil
+		return io.NopCloser(bzip2.NewReader(r)), nil
 	case Xz:
-		return xz.NewReader(r)
+		if xzBinaryPath, err := exec.LookPath("xz"); err == nil {
+			return newXZBinaryReader(xzBinaryPath, r), nil
+		}
+		xr, err := xz.NewReader(r)
+		if err != nil {
+			return nil, err
+		}
+		return io.NopCloser(xr), nil
 	case Zstd:
 		zr, err := zstd.NewReader(r)
 		if err != nil {
 			return nil, err
 		}
-		return zstdReader{zr}, nil
+		return zr.IOReadCloser(), nil
 	case Lzma:
-		return lzma.NewReader(r)
+		lr, err := lzma.NewReader(r)
+		if err != nil {
+			return nil, err
+		}
+		return io.NopCloser(lr), nil
 	default:
 		return nil, fmt.Errorf("compress: unknown codec %q", codec)
 	}
@@ -161,6 +178,7 @@ func spool(dr io.Reader) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	n, err := io.Copy(tmp, dr)
 	if err != nil {
 		tmp.Close()
@@ -170,8 +188,79 @@ func spool(dr io.Reader) (*File, error) {
 	return &File{ra: tmp, size: n, tmp: tmp}, nil
 }
 
-// zstdReader adapts a *zstd.Decoder to io.Reader; the decoder needs no explicit
-// close because spool reads it to completion.
-type zstdReader struct{ *zstd.Decoder }
+type xzBinaryReader struct {
+	cmd    *exec.Cmd
+	stdout io.ReadCloser
+	stderr bytes.Buffer
+	err    error
+	closed bool
+}
 
-func (z zstdReader) Read(p []byte) (int, error) { return z.Decoder.Read(p) }
+func newXZBinaryReader(xzBinaryPath string, r io.Reader) *xzBinaryReader {
+	cmd := exec.Command(xzBinaryPath, "--decompress", "--stdout", "--format=xz")
+	xr := &xzBinaryReader{cmd: cmd}
+	cmd.Stdin = r
+	cmd.Stderr = &xr.stderr
+	// Host compression preferences must not change library behavior.
+	envs := cmd.Environ()
+	cmd.Env = []string{}
+	for _, env := range envs {
+		if !strings.HasPrefix(env, "XZ_DEFAULTS=") && !strings.HasPrefix(env, "XZ_OPT=") {
+			cmd.Env = append(cmd.Env, env)
+		}
+	}
+	return xr
+}
+
+func (r *xzBinaryReader) Read(p []byte) (int, error) {
+	if r.closed {
+		return 0, os.ErrClosed
+	}
+	if r.err != nil {
+		return 0, r.err
+	}
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if r.stdout == nil {
+		r.stdout, r.err = r.cmd.StdoutPipe()
+		if r.err == nil {
+			r.err = r.cmd.Start()
+		}
+		if r.err != nil {
+			r.err = fmt.Errorf("compress: xz: %w", r.err)
+			return 0, r.err
+		}
+	}
+	n, err := r.stdout.Read(p)
+	if err == io.EOF {
+		// EOF is only reported after the process has exited successfully.
+		if waitErr := r.cmd.Wait(); waitErr != nil {
+			err = fmt.Errorf("compress: xz: %w: %s", waitErr, strings.TrimSpace(r.stderr.String()))
+		}
+	}
+	r.err = err
+	return n, err
+}
+
+// Close also stops and reaps the process if spooling fails before reaching EOF.
+func (r *xzBinaryReader) Close() error {
+	if r.closed {
+		return nil
+	}
+	r.closed = true
+	if r.cmd.Process == nil || r.cmd.ProcessState != nil {
+		return nil
+	}
+	killErr := r.cmd.Process.Kill()
+	waitErr := r.cmd.Wait()
+	if killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
+		return fmt.Errorf("compress: stop xz: %w", killErr)
+	}
+	// Terminating an unfinished decoder intentionally produces an exit error.
+	var exitErr *exec.ExitError
+	if waitErr != nil && !errors.As(waitErr, &exitErr) {
+		return fmt.Errorf("compress: wait for xz: %w", waitErr)
+	}
+	return nil
+}
