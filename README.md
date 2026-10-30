@@ -126,6 +126,11 @@ without copying or a temp file (and `Close` is then a no-op). `DecompressAs`
 selects the codec explicitly (needed for lzma, which has no reliable magic; rpm
 names its payload codec in the header).
 
+XZ decompression uses the system `xz` binary when it is available on `PATH`,
+falling back to the pure-Go decoder otherwise. No external binary is required.
+`XZ_DEFAULTS` and `XZ_OPT` are ignored so host settings cannot change decoding.
+If the binary is found but fails, its error is returned without retrying in Go.
+
 ## deb
 
 ```go
